@@ -1,23 +1,30 @@
 //! Tempo EVM Handler implementation.
 
-use std::{
-    cmp::Ordering,
-    fmt::Debug,
-};
+use std::{cmp::Ordering, fmt::Debug};
 
-#[cfg(not(feature = "certora"))]
-use std::sync::{Arc, OnceLock};
 #[cfg(feature = "certora")]
 use crate::certora::{Arc, OnceLock};
+#[cfg(not(feature = "certora"))]
+use std::sync::{Arc, OnceLock};
 
-#[cfg(not(feature = "certora"))]
-use alloy_primitives::{Address, TxKind, U256};
 #[cfg(feature = "certora")]
-use crate::certora::{Address, TxKind, U256};
-#[cfg(not(feature = "certora"))]
-use reth_evm::{EvmError, EvmInternals};
+use crate::certora::Address;
+#[cfg(feature = "certora")]
+use crate::certora::{
+    AccountKeychain, AuthorizeKeyCall, Database, EXPIRING_NONCE_MAX_EXPIRY_SECS,
+    EvmPrecompileStorageProvider, FeePaymentError, GasId, GasParams, InsufficientBalance,
+    InvalidTransaction, NonceError, NonceManager, PrecompileSignatureType, SignatureType,
+    StorageCtx, TEMPO_EXPIRING_NONCE_KEY, TIP20Error, TIPFeeAMMError, TempoEvm,
+    TempoInvalidTransaction, TempoPrecompileError, TipFeeManager, TokenLimit, Vec,
+    get_token_balance, getNonceCall, is_tip20_prefix,
+    pre_execution::{self, calculate_caller_fee},
+};
 #[cfg(feature = "certora")]
 use crate::certora::{EVMError, EvmInternals};
+#[cfg(not(feature = "certora"))]
+use alloy_primitives::{Address, TxKind, U256};
+#[cfg(not(feature = "certora"))]
+use reth_evm::{EvmError, EvmInternals};
 #[cfg(not(feature = "certora"))]
 use revm::{
     Database,
@@ -42,16 +49,6 @@ use revm::{
         },
         interpreter::EthInterpreter,
     },
-};
-#[cfg(feature = "certora")]
-use crate::certora::{
-    AccountKeychain, Database, FeePaymentError, GasId, GasParams, InsufficientBalance,
-    InvalidTransaction, NonceError, NonceManager, PrecompileSignatureType, SignatureType,
-    StorageCtx, TEMPO_EXPIRING_NONCE_KEY, TempoEvm, TempoInvalidTransaction,
-    TempoPrecompileError, TIP20Error, TIPFeeAMMError, TipFeeManager, TokenLimit,
-    Vec, authorizeKeyCall, getNonceCall, get_token_balance, is_tip20_prefix,
-    pre_execution::{self, calculate_caller_fee},
-    EXPIRING_NONCE_MAX_EXPIRY_SECS, EvmPrecompileStorageProvider,
 };
 #[cfg(not(feature = "certora"))]
 use tempo_contracts::precompiles::{
@@ -427,7 +424,7 @@ impl<DB: Database, I> TempoEvmHandler<DB, I> {
                     let state = nonce_manager
                         .get_nonce(getNonceCall {
                             account: tx.caller(),
-                            nonceKey: nonce_key,
+                            nonce_key,
                         })
                         .map_err(|err| match err {
                             TempoPrecompileError::Fatal(err) => EVMError::Custom(err),
@@ -620,7 +617,7 @@ impl<DB: Database, I> TempoEvmHandler<DB, I> {
                     .unwrap_or_default();
 
                 // Create the authorize key call
-                let authorize_call = authorizeKeyCall {
+                let authorize_call = AuthorizeKeyCall {
                     keyId: access_key_addr,
                     signatureType: signature_type,
                     expiry,

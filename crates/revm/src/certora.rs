@@ -263,7 +263,7 @@ pub struct TokenLimit {
 
 #[allow(non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct authorizeKeyCall {
+pub struct AuthorizeKeyCall {
     pub keyId: Address,
     pub signatureType: PrecompileSignatureType,
     pub expiry: u64,
@@ -298,13 +298,19 @@ impl SignedKeyAuthorization {
     pub fn validate_chain_id(
         &self,
         expected_chain_id: u64,
-        _strict: bool,
+        strict: bool,
     ) -> Result<(), KeyAuthorizationChainIdError> {
-        if self.authorization.chain_id == expected_chain_id {
-            Ok(())
-        } else {
-            Err(KeyAuthorizationChainIdError)
+        if strict {
+            if self.authorization.chain_id != expected_chain_id {
+                return Err(KeyAuthorizationChainIdError);
+            }
+        } else if self.authorization.chain_id != 0
+            && self.authorization.chain_id != expected_chain_id
+        {
+            return Err(KeyAuthorizationChainIdError);
         }
+
+        Ok(())
     }
 }
 
@@ -641,9 +647,14 @@ pub struct Checkpoint;
 #[derive(Debug, Clone)]
 pub struct JournaledState<DB: Database> {
     pub caller_account: CallerAccount,
+    /// Configurable mock balance entry used by `get_token_balance`.
     pub mock_balance_token: Address,
+    /// Configurable mock balance entry used by `get_token_balance`.
     pub mock_balance_owner: Address,
+    /// Configurable mock balance entry used by `get_token_balance`.
     pub mock_token_balance: U256,
+    /// Configurable error returned by `validate_keychain_authorization`.
+    pub mock_keychain_validation_error: Option<TempoPrecompileError>,
     _phantom: PhantomData<DB>,
 }
 
@@ -657,16 +668,23 @@ impl<DB: Database> Default for JournaledState<DB> {
             mock_balance_token: Address::ZERO,
             mock_balance_owner: Address::ZERO,
             mock_token_balance: U256::ZERO,
+            mock_keychain_validation_error: None,
             _phantom: PhantomData,
         }
     }
 }
 
 impl<DB: Database> JournaledState<DB> {
+    /// Sets the single `(token, owner) -> balance` entry used by the certora model.
     pub fn set_token_balance(&mut self, token: Address, owner: Address, balance: U256) {
         self.mock_balance_token = token;
         self.mock_balance_owner = owner;
         self.mock_token_balance = balance;
+    }
+
+    /// Sets the configured error used by `validate_keychain_authorization`.
+    pub fn set_keychain_validation_error(&mut self, error: Option<TempoPrecompileError>) {
+        self.mock_keychain_validation_error = error;
     }
 
     pub fn get_fee_token(
@@ -798,7 +816,10 @@ pub enum TempoInvalidTransaction {
     #[error("keychain precompile error: {reason}")]
     KeychainPrecompileError { reason: &'static str },
     #[error("keychain user address mismatch")]
-    KeychainUserAddressMismatch { user_address: Address, caller: Address },
+    KeychainUserAddressMismatch {
+        user_address: Address,
+        caller: Address,
+    },
     #[error("keychain validation failed: {reason}")]
     KeychainValidationFailed { reason: &'static str },
     #[error("invalid chain id")]
@@ -880,17 +901,19 @@ impl StorageCtx {
         f()
     }
 
-    pub fn enter_precompile<J, B, C, T, F, R, DBError>(
-        _journal: &mut J,
+    pub fn enter_precompile<DB: Database, B, C, T, F, R>(
+        journal: &mut JournaledState<DB>,
         _block: &B,
         _cfg: &C,
         _tx: &T,
         f: F,
-    ) -> Result<R, EVMError<DBError, TempoInvalidTransaction>>
+    ) -> Result<R, EVMError<DB::Error, TempoInvalidTransaction>>
     where
-        F: FnOnce(AccountKeychain) -> Result<R, EVMError<DBError, TempoInvalidTransaction>>,
+        F: FnOnce(AccountKeychain) -> Result<R, EVMError<DB::Error, TempoInvalidTransaction>>,
     {
-        f(AccountKeychain::default())
+        f(AccountKeychain {
+            validation_error: journal.mock_keychain_validation_error.clone(),
+        })
     }
 }
 
@@ -942,11 +965,13 @@ impl TempoPrecompileError {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct AccountKeychain;
+pub struct AccountKeychain {
+    validation_error: Option<TempoPrecompileError>,
+}
 
 impl AccountKeychain {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 
     pub fn set_tx_origin(&mut self, _origin: Address) -> Result<(), TempoPrecompileError> {
@@ -956,7 +981,7 @@ impl AccountKeychain {
     pub fn authorize_key(
         &mut self,
         _root_account: Address,
-        _call: authorizeKeyCall,
+        _call: AuthorizeKeyCall,
     ) -> Result<(), TempoPrecompileError> {
         Ok(())
     }
@@ -968,7 +993,10 @@ impl AccountKeychain {
         _timestamp: u64,
         _sig_type: Option<PrecompileSignatureType>,
     ) -> Result<(), TempoPrecompileError> {
-        Ok(())
+        match &self.validation_error {
+            Some(err) => Err(err.clone()),
+            None => Ok(()),
+        }
     }
 
     pub fn set_transaction_key(
@@ -1002,10 +1030,13 @@ impl TipFeeManager {
     }
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy)]
 pub struct getNonceCall {
+    #[allow(non_snake_case)]
     pub account: Address,
-    pub nonceKey: U256,
+    #[allow(non_snake_case)]
+    pub nonce_key: U256,
 }
 
 #[derive(Debug, Default, Clone)]
