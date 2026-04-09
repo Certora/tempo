@@ -641,6 +641,9 @@ pub struct Checkpoint;
 #[derive(Debug, Clone)]
 pub struct JournaledState<DB: Database> {
     pub caller_account: CallerAccount,
+    pub mock_balance_token: Address,
+    pub mock_balance_owner: Address,
+    pub mock_token_balance: U256,
     _phantom: PhantomData<DB>,
 }
 
@@ -651,12 +654,38 @@ impl<DB: Database> Default for JournaledState<DB> {
                 nonce: 0,
                 info: AccountInfo,
             },
+            mock_balance_token: Address::ZERO,
+            mock_balance_owner: Address::ZERO,
+            mock_token_balance: U256::ZERO,
             _phantom: PhantomData,
         }
     }
 }
 
 impl<DB: Database> JournaledState<DB> {
+    pub fn set_token_balance(&mut self, token: Address, owner: Address, balance: U256) {
+        self.mock_balance_token = token;
+        self.mock_balance_owner = owner;
+        self.mock_token_balance = balance;
+    }
+
+    pub fn get_fee_token(
+        &mut self,
+        tx: &TempoTxEnv,
+        _fee_payer: Address,
+        _spec: MockSpec,
+    ) -> Result<Address, TempoPrecompileError> {
+        Ok(tx.fee_token.unwrap_or(Address::ZERO))
+    }
+
+    pub fn is_tip20_usd(
+        &mut self,
+        _spec: MockSpec,
+        _fee_token: Address,
+    ) -> Result<bool, TempoPrecompileError> {
+        Ok(true)
+    }
+
     pub fn load_account_with_code_mut(
         &mut self,
         _address: Address,
@@ -715,6 +744,10 @@ impl<DB: Database, I> TempoEvm<DB, I> {
             collected_fee: U256::ZERO,
             inspector,
         }
+    }
+
+    pub fn ctx_mut(&mut self) -> &mut TempoContext<DB> {
+        &mut self.inner.ctx
     }
 }
 
@@ -1061,9 +1094,13 @@ pub fn is_tip20_prefix(_token: Address) -> bool {
 }
 
 pub fn get_token_balance<DB: Database>(
-    _journal: &mut JournaledState<DB>,
-    _token: Address,
-    _sender: Address,
+    journal: &mut JournaledState<DB>,
+    token: Address,
+    sender: Address,
 ) -> Result<U256, EVMError<DB::Error, TempoInvalidTransaction>> {
-    Ok(U256::from(1_000_000u64))
+    if token == journal.mock_balance_token && sender == journal.mock_balance_owner {
+        Ok(journal.mock_token_balance)
+    } else {
+        Ok(U256::ZERO)
+    }
 }

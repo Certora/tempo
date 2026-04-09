@@ -81,6 +81,16 @@ use crate::{
     gas_params::TempoGasParams,
 };
 
+#[cfg(not(feature = "certora"))]
+fn certora_err_text(value: impl ToString) -> String {
+    value.to_string()
+}
+
+#[cfg(feature = "certora")]
+fn certora_err_text(_value: impl core::fmt::Display) -> &'static str {
+    "certora model error"
+}
+
 /// Additional gas for P256 signature verification
 /// P256 precompile cost (6900 from EIP-7951) + 1100 for 129 bytes extra signature size - ecrecover savings (3000)
 #[cfg(not(feature = "certora"))]
@@ -797,8 +807,7 @@ impl<DB: Database, I> TempoEvmHandler<DB, I> {
     }
 }
 
-#[cfg(not(feature = "certora"))]
-impl<DB: alloy_evm::Database, I> TempoEvmHandler<DB, I> {
+impl<DB: Database, I> TempoEvmHandler<DB, I> {
     /// Loads the fee token and fee payer from the transaction environment.
     ///
     /// Resolves and validates the fee fields used by Tempo's fee system:
@@ -820,7 +829,7 @@ impl<DB: alloy_evm::Database, I> TempoEvmHandler<DB, I> {
         self.fee_token = ctx
             .journaled_state
             .get_fee_token(&ctx.tx, self.fee_payer, ctx.cfg.spec)
-            .map_err(|err| EVMError::Custom(err.to_string()))?;
+            .map_err(|err| EVMError::Custom(certora_err_text(err)))?;
 
         // Always validate TIP20 prefix to prevent panics in get_token_balance.
         // This is a protocol-level check since validators could bypass initial validation.
@@ -834,7 +843,7 @@ impl<DB: alloy_evm::Database, I> TempoEvmHandler<DB, I> {
             && !ctx
                 .journaled_state
                 .is_tip20_usd(ctx.cfg.spec, self.fee_token)
-                .map_err(|err| EVMError::Custom(err.to_string()))?
+                .map_err(|err| EVMError::Custom(certora_err_text(err)))?
         {
             return Err(TempoInvalidTransaction::InvalidFeeToken(self.fee_token).into());
         }
