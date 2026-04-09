@@ -1,6 +1,9 @@
 //! Tempo revm specific implementations.
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(
+    all(not(test), not(feature = "certora")),
+    warn(unused_crate_dependencies)
+)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[cfg(feature = "certora")]
