@@ -13,7 +13,7 @@ fn nondet_address() -> Address {
 }
 
 fn nondet_balance() -> U256 {
-    let balance: u64 = nondet();
+    let balance: u64 = nondet(); // fix later
     U256::from(balance)
 }
 

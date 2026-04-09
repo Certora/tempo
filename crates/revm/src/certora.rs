@@ -60,7 +60,7 @@ impl<T> OnceLock<T> {
 unsafe impl<T: Send> Send for OnceLock<T> {}
 unsafe impl<T: Send + Sync> Sync for OnceLock<T> {}
 
-const CERTORA_VEC_MAX: usize = 8;
+const CERTORA_VEC_MAX: usize = 8; // hardcoded size
 
 pub struct Vec<T> {
     len: usize,
@@ -138,7 +138,7 @@ impl Address {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct B256(u64);
+pub struct B256(u64); // fix this later
 
 impl B256 {
     pub const ZERO: Self = Self(0);
@@ -159,7 +159,7 @@ impl SaturatingFromU128 for u64 {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct U256(u128);
+pub struct U256(u128); // fix later
 
 impl U256 {
     pub const ZERO: Self = Self(0);
