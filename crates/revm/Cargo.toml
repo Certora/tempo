@@ -48,3 +48,4 @@ test-case.workspace = true
 [features]
 reth = ["dep:reth-storage-api"]
 rpc = ["dep:reth-rpc-eth-types"]
+certora = []

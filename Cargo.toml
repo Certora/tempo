@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.3.0"
+version = "1.4.0-rc1"
 edition = "2024"
 rust-version = "1.93.0"
 license = "MIT OR Apache-2.0"
@@ -31,6 +31,7 @@ members = [
   "crates/transaction-pool",
   "crates/revm",
   "xtask",
+  "crates/certora-revm-harness",
 ]
 
 # Resolver 3 is available with edition 2024

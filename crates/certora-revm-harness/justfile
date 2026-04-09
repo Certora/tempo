@@ -1,0 +1,15 @@
+export RUSTFLAGS := "-C strip=none"
+
+target := "../../target"
+
+wasip1:
+	cargo build --target wasm32-wasip1 --release
+
+build:
+	cargo build --target wasm32-unknown-unknown --release
+
+expand:
+	cargo expand --target wasm32-unknown-unknown --release
+
+clean:
+	rm -rf {{target}}

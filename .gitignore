@@ -36,3 +36,7 @@ _
 
 # LLVM coverage profraw files
 *.profraw
+
+# Certora
+emv-*
+*.wat
