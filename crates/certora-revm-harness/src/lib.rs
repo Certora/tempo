@@ -1,9 +1,10 @@
 use cvlr::{cvlr_assert, cvlr_assume, cvlr_satisfy, nondet, rule};
 use tempo_revm::{
     certora::{
-        Address, EmptyDB, KeyAuthorization, MockKeychainSignature, MockPrimitiveSignature,
-        SignatureType, SignedKeyAuthorization, TempoBatchCallEnv, TempoContext, TempoEvm,
-        TempoPrecompileError, TempoSignature, TempoTxEnv, U256,
+        Address, EmptyDB, KeyAuthorization, KeyAuthorizationTokenLimit, MockKeychainSignature,
+        MockPrimitiveSignature, SignatureType, SignedKeyAuthorization, TempoBatchCallEnv,
+        TempoContext, TempoEvm, TempoPrecompileError, TempoSignature, TempoTxEnv,
+        Vec as CertoraVec, U256,
     },
     handler::TempoEvmHandler,
 };
@@ -15,6 +16,29 @@ fn nondet_address() -> Address {
 fn nondet_balance() -> U256 {
     let balance: u64 = nondet(); // fix later
     U256::from(balance)
+}
+
+fn nondet_expiry() -> Option<u64> {
+    if nondet::<bool>() {
+        Some(nondet())
+    } else {
+        None
+    }
+}
+
+fn nondet_limits() -> Option<CertoraVec<KeyAuthorizationTokenLimit>> {
+    if !nondet::<bool>() {
+        return None;
+    }
+
+    let mut limits = CertoraVec::default();
+    if nondet::<bool>() {
+        limits.push(KeyAuthorizationTokenLimit {
+            token: nondet_address(),
+            limit: nondet_balance(),
+        });
+    }
+    Some(limits)
 }
 
 fn nondet_signature_type() -> SignatureType {
@@ -73,8 +97,8 @@ pub fn sunbeam_key_auth_not_signed_by_root() {
             chain_id: expected_chain_id,
             key_type: signature_type,
             key_id: nondet_address(),
-            expiry: None,
-            limits: None,
+            expiry: nondet_expiry(),
+            limits: nondet_limits(),
         },
         signature: MockPrimitiveSignature { signature_type },
         recovered_signer: Ok(auth_signer),
@@ -114,8 +138,8 @@ pub fn sunbeam_key_auth_not_signed_by_root_sanity() {
             chain_id: expected_chain_id,
             key_type: signature_type,
             key_id: nondet_address(),
-            expiry: None,
-            limits: None,
+            expiry: nondet_expiry(),
+            limits: nondet_limits(),
         },
         signature: MockPrimitiveSignature { signature_type },
         recovered_signer: Ok(auth_signer),
@@ -139,7 +163,6 @@ pub fn sunbeam_key_auth_not_signed_by_root_sanity() {
     cvlr_satisfy!(true);
 }
 
-
 #[rule]
 pub fn sunbeam_key_auth_signature_recovery_fails() {
     let root_account = nondet_address();
@@ -153,25 +176,27 @@ pub fn sunbeam_key_auth_signature_recovery_fails() {
             chain_id: expected_chain_id,
             key_type: signature_type,
             key_id: nondet_address(),
-            expiry: None,
-            limits: None,
+            expiry: nondet_expiry(),
+            limits: nondet_limits(),
         },
-        signature: MockPrimitiveSignature {
-            signature_type,
-        },
+        signature: MockPrimitiveSignature { signature_type },
         recovered_signer: Err(()), // by construction, we make this Err
     };
 
     let aa_env = TempoBatchCallEnv {
-        signature: TempoSignature::Primitive(MockPrimitiveSignature {
-            signature_type,
-        }),
+        signature: TempoSignature::Primitive(MockPrimitiveSignature { signature_type }),
         key_authorization: Some(key_auth),
         ..Default::default()
     };
 
-    let (mut evm, handler) =
-        prepare_evm_and_handler(root_account, fee_token, fee_payer, expected_chain_id, nondet_balance(), aa_env);
+    let (mut evm, handler) = prepare_evm_and_handler(
+        root_account,
+        fee_token,
+        fee_payer,
+        expected_chain_id,
+        nondet_balance(),
+        aa_env,
+    );
     let result = handler.validate_against_state_and_deduct_caller(&mut evm);
     cvlr_assert!(result.is_err());
 }
@@ -189,25 +214,27 @@ pub fn sunbeam_key_auth_signature_recovery_fails_sanity() {
             chain_id: expected_chain_id,
             key_type: signature_type,
             key_id: nondet_address(),
-            expiry: None,
-            limits: None,
+            expiry: nondet_expiry(),
+            limits: nondet_limits(),
         },
-        signature: MockPrimitiveSignature {
-            signature_type,
-        },
+        signature: MockPrimitiveSignature { signature_type },
         recovered_signer: Err(()),
     };
 
     let aa_env = TempoBatchCallEnv {
-        signature: TempoSignature::Primitive(MockPrimitiveSignature {
-            signature_type,
-        }),
+        signature: TempoSignature::Primitive(MockPrimitiveSignature { signature_type }),
         key_authorization: Some(key_auth),
         ..Default::default()
     };
 
-    let (mut evm, handler) =
-        prepare_evm_and_handler(root_account, fee_token, fee_payer, expected_chain_id, nondet_balance(), aa_env);
+    let (mut evm, handler) = prepare_evm_and_handler(
+        root_account,
+        fee_token,
+        fee_payer,
+        expected_chain_id,
+        nondet_balance(),
+        aa_env,
+    );
     let _result = handler.validate_against_state_and_deduct_caller(&mut evm);
     cvlr_satisfy!(true);
 }
@@ -230,25 +257,27 @@ pub fn sunbeam_key_auth_chain_id_mismatch() {
             chain_id: wrong_chain_id,
             key_type: signature_type,
             key_id: nondet_address(),
-            expiry: None,
-            limits: None,
+            expiry: nondet_expiry(),
+            limits: nondet_limits(),
         },
-        signature: MockPrimitiveSignature {
-            signature_type,
-        },
+        signature: MockPrimitiveSignature { signature_type },
         recovered_signer: Ok(root_account),
     };
 
     let aa_env = TempoBatchCallEnv {
-        signature: TempoSignature::Primitive(MockPrimitiveSignature {
-            signature_type,
-        }),
+        signature: TempoSignature::Primitive(MockPrimitiveSignature { signature_type }),
         key_authorization: Some(key_auth),
         ..Default::default()
     };
 
-    let (mut evm, handler) =
-        prepare_evm_and_handler(root_account, fee_token, fee_payer, expected_chain_id, nondet_balance(), aa_env);
+    let (mut evm, handler) = prepare_evm_and_handler(
+        root_account,
+        fee_token,
+        fee_payer,
+        expected_chain_id,
+        nondet_balance(),
+        aa_env,
+    );
     let result = handler.validate_against_state_and_deduct_caller(&mut evm);
     cvlr_assert!(result.is_err());
 }
@@ -271,25 +300,27 @@ pub fn sunbeam_key_auth_chain_id_mismatch_sanity() {
             chain_id: wrong_chain_id,
             key_type: signature_type,
             key_id: nondet_address(),
-            expiry: None,
-            limits: None,
+            expiry: nondet_expiry(),
+            limits: nondet_limits(),
         },
-        signature: MockPrimitiveSignature {
-            signature_type,
-        },
+        signature: MockPrimitiveSignature { signature_type },
         recovered_signer: Ok(root_account),
     };
 
     let aa_env = TempoBatchCallEnv {
-        signature: TempoSignature::Primitive(MockPrimitiveSignature {
-            signature_type,
-        }),
+        signature: TempoSignature::Primitive(MockPrimitiveSignature { signature_type }),
         key_authorization: Some(key_auth),
         ..Default::default()
     };
 
-    let (mut evm, handler) =
-        prepare_evm_and_handler(root_account, fee_token, fee_payer, expected_chain_id, nondet_balance(), aa_env);
+    let (mut evm, handler) = prepare_evm_and_handler(
+        root_account,
+        fee_token,
+        fee_payer,
+        expected_chain_id,
+        nondet_balance(),
+        aa_env,
+    );
     let _result = handler.validate_against_state_and_deduct_caller(&mut evm);
     cvlr_satisfy!(true);
 }
@@ -311,12 +342,10 @@ pub fn sunbeam_access_key_cannot_authorize_other_keys() {
             chain_id: expected_chain_id,
             key_type: signature_type,
             key_id: authorized_key_id,
-            expiry: None,
-            limits: None,
+            expiry: nondet_expiry(),
+            limits: nondet_limits(),
         },
-        signature: MockPrimitiveSignature {
-            signature_type,
-        },
+        signature: MockPrimitiveSignature { signature_type },
         recovered_signer: Ok(root_account),
     };
 
@@ -324,16 +353,20 @@ pub fn sunbeam_access_key_cannot_authorize_other_keys() {
         signature: TempoSignature::Keychain(MockKeychainSignature {
             user_address: root_account,
             access_key_addr: Ok(access_key_addr),
-            signature: MockPrimitiveSignature {
-                signature_type,
-            },
+            signature: MockPrimitiveSignature { signature_type },
         }),
         key_authorization: Some(key_auth),
         ..Default::default()
     };
 
-    let (mut evm, handler) =
-        prepare_evm_and_handler(root_account, fee_token, fee_payer, expected_chain_id, nondet_balance(), aa_env);
+    let (mut evm, handler) = prepare_evm_and_handler(
+        root_account,
+        fee_token,
+        fee_payer,
+        expected_chain_id,
+        nondet_balance(),
+        aa_env,
+    );
     let result = handler.validate_against_state_and_deduct_caller(&mut evm);
     cvlr_assert!(result.is_err());
 }
@@ -355,12 +388,10 @@ pub fn sunbeam_access_key_cannot_authorize_other_keys_sanity() {
             chain_id: expected_chain_id,
             key_type: signature_type,
             key_id: authorized_key_id,
-            expiry: None,
-            limits: None,
+            expiry: nondet_expiry(),
+            limits: nondet_limits(),
         },
-        signature: MockPrimitiveSignature {
-            signature_type,
-        },
+        signature: MockPrimitiveSignature { signature_type },
         recovered_signer: Ok(root_account),
     };
 
@@ -368,16 +399,20 @@ pub fn sunbeam_access_key_cannot_authorize_other_keys_sanity() {
         signature: TempoSignature::Keychain(MockKeychainSignature {
             user_address: root_account,
             access_key_addr: Ok(access_key_addr),
-            signature: MockPrimitiveSignature {
-                signature_type,
-            },
+            signature: MockPrimitiveSignature { signature_type },
         }),
         key_authorization: Some(key_auth),
         ..Default::default()
     };
 
-    let (mut evm, handler) =
-        prepare_evm_and_handler(root_account, fee_token, fee_payer, expected_chain_id, nondet_balance(), aa_env);
+    let (mut evm, handler) = prepare_evm_and_handler(
+        root_account,
+        fee_token,
+        fee_payer,
+        expected_chain_id,
+        nondet_balance(),
+        aa_env,
+    );
     let _result = handler.validate_against_state_and_deduct_caller(&mut evm);
     cvlr_satisfy!(true);
 }
@@ -400,24 +435,26 @@ pub fn sunbeam_access_key_expiry_in_past() {
             key_type: signature_type,
             key_id: nondet_address(),
             expiry: Some(expiry),
-            limits: None,
+            limits: nondet_limits(),
         },
-        signature: MockPrimitiveSignature {
-            signature_type,
-        },
+        signature: MockPrimitiveSignature { signature_type },
         recovered_signer: Ok(root_account),
     };
 
     let aa_env = TempoBatchCallEnv {
-        signature: TempoSignature::Primitive(MockPrimitiveSignature {
-            signature_type,
-        }),
+        signature: TempoSignature::Primitive(MockPrimitiveSignature { signature_type }),
         key_authorization: Some(key_auth),
         ..Default::default()
     };
 
-    let (mut evm, handler) =
-        prepare_evm_and_handler(root_account, fee_token, fee_payer, expected_chain_id, nondet_balance(), aa_env);
+    let (mut evm, handler) = prepare_evm_and_handler(
+        root_account,
+        fee_token,
+        fee_payer,
+        expected_chain_id,
+        nondet_balance(),
+        aa_env,
+    );
     evm.inner.ctx.block.timestamp = U256::from(current_timestamp);
     let result = handler.validate_against_state_and_deduct_caller(&mut evm);
     cvlr_assert!(result.is_err());
@@ -441,24 +478,26 @@ pub fn sunbeam_access_key_expiry_in_past_sanity() {
             key_type: signature_type,
             key_id: nondet_address(),
             expiry: Some(expiry),
-            limits: None,
+            limits: nondet_limits(),
         },
-        signature: MockPrimitiveSignature {
-            signature_type,
-        },
+        signature: MockPrimitiveSignature { signature_type },
         recovered_signer: Ok(root_account),
     };
 
     let aa_env = TempoBatchCallEnv {
-        signature: TempoSignature::Primitive(MockPrimitiveSignature {
-            signature_type,
-        }),
+        signature: TempoSignature::Primitive(MockPrimitiveSignature { signature_type }),
         key_authorization: Some(key_auth),
         ..Default::default()
     };
 
-    let (mut evm, handler) =
-        prepare_evm_and_handler(root_account, fee_token, fee_payer, expected_chain_id, nondet_balance(), aa_env);
+    let (mut evm, handler) = prepare_evm_and_handler(
+        root_account,
+        fee_token,
+        fee_payer,
+        expected_chain_id,
+        nondet_balance(),
+        aa_env,
+    );
     evm.inner.ctx.block.timestamp = U256::from(current_timestamp);
     let _result = handler.validate_against_state_and_deduct_caller(&mut evm);
     cvlr_satisfy!(true);
@@ -477,16 +516,20 @@ pub fn sunbeam_keychain_validation_fails() {
         signature: TempoSignature::Keychain(MockKeychainSignature {
             user_address: root_account,
             access_key_addr: Ok(access_key_addr),
-            signature: MockPrimitiveSignature {
-                signature_type,
-            },
+            signature: MockPrimitiveSignature { signature_type },
         }),
         key_authorization: None,
         ..Default::default()
     };
 
-    let (mut evm, handler) =
-        prepare_evm_and_handler(root_account, fee_token, fee_payer, expected_chain_id, nondet_balance(), aa_env);
+    let (mut evm, handler) = prepare_evm_and_handler(
+        root_account,
+        fee_token,
+        fee_payer,
+        expected_chain_id,
+        nondet_balance(),
+        aa_env,
+    );
     evm.inner
         .ctx
         .journaled_state
@@ -511,16 +554,20 @@ pub fn sunbeam_keychain_validation_fails_sanity() {
         signature: TempoSignature::Keychain(MockKeychainSignature {
             user_address: root_account,
             access_key_addr: Ok(access_key_addr),
-            signature: MockPrimitiveSignature {
-                signature_type,
-            },
+            signature: MockPrimitiveSignature { signature_type },
         }),
         key_authorization: None,
         ..Default::default()
     };
 
-    let (mut evm, handler) =
-        prepare_evm_and_handler(root_account, fee_token, fee_payer, expected_chain_id, nondet_balance(), aa_env);
+    let (mut evm, handler) = prepare_evm_and_handler(
+        root_account,
+        fee_token,
+        fee_payer,
+        expected_chain_id,
+        nondet_balance(),
+        aa_env,
+    );
     evm.inner
         .ctx
         .journaled_state
