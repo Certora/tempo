@@ -1,9 +1,9 @@
-use cvlr::{cvlr_assert, cvlr_assume, cvlr_satisfy, nondet, rule};
+use cvlr::{cvlr_assert, cvlr_satisfy, nondet, rule};
 use tempo_revm::{
     certora::{
-        Address, EmptyDB, KeyAuthorization, KeyAuthorizationTokenLimit, MockKeychainSignature,
-        MockPrimitiveSignature, SignatureType, SignedKeyAuthorization, TempoBatchCallEnv,
-        TempoContext, TempoEvm, TempoPrecompileError, TempoSignature, TempoTxEnv,
+        Address, EmptyDB, KeyAuthorization, KeyAuthorizationTokenLimit, MockHardfork,
+        MockKeychainSignature, MockPrimitiveSignature, SignatureType, SignedKeyAuthorization,
+        TempoBatchCallEnv, TempoContext, TempoEvm, TempoSignature, TempoTxEnv,
         Vec as CertoraVec, U256,
     },
     handler::TempoEvmHandler,
@@ -39,6 +39,14 @@ fn nondet_limits() -> Option<CertoraVec<KeyAuthorizationTokenLimit>> {
         });
     }
     Some(limits)
+}
+
+fn nondet_recovered_signer() -> Result<Address, ()> {
+    if nondet::<bool>() {
+        Ok(nondet_address())
+    } else {
+        Err(())
+    }
 }
 
 fn nondet_signature_type() -> SignatureType {
@@ -84,13 +92,11 @@ fn prepare_evm_and_handler(
 #[rule]
 pub fn sunbeam_key_auth_not_signed_by_root() {
     let root_account = nondet_address();
-    let auth_signer = nondet_address();
     let fee_token = nondet_address();
     let fee_payer = nondet_address();
     let expected_chain_id: u64 = nondet();
     let signature_type = nondet_signature_type();
-
-    cvlr_assume!(auth_signer != root_account);
+    let recovered_signer = nondet_recovered_signer();
 
     let key_auth = SignedKeyAuthorization {
         authorization: KeyAuthorization {
@@ -101,7 +107,7 @@ pub fn sunbeam_key_auth_not_signed_by_root() {
             limits: nondet_limits(),
         },
         signature: MockPrimitiveSignature { signature_type },
-        recovered_signer: Ok(auth_signer),
+        recovered_signer,
     };
 
     let aa_env = TempoBatchCallEnv {
@@ -119,19 +125,17 @@ pub fn sunbeam_key_auth_not_signed_by_root() {
         aa_env,
     );
     let result = handler.validate_against_state_and_deduct_caller(&mut evm);
-    cvlr_assert!(result.is_err());
+    cvlr_assert!(result.is_err() || recovered_signer == Ok(root_account));
 }
 
 #[rule]
 pub fn sunbeam_key_auth_not_signed_by_root_sanity() {
     let root_account = nondet_address();
-    let auth_signer = nondet_address();
     let fee_token = nondet_address();
     let fee_payer = nondet_address();
     let expected_chain_id: u64 = nondet();
     let signature_type = nondet_signature_type();
-
-    cvlr_assume!(auth_signer != root_account);
+    let recovered_signer = nondet_recovered_signer();
 
     let key_auth = SignedKeyAuthorization {
         authorization: KeyAuthorization {
@@ -142,83 +146,7 @@ pub fn sunbeam_key_auth_not_signed_by_root_sanity() {
             limits: nondet_limits(),
         },
         signature: MockPrimitiveSignature { signature_type },
-        recovered_signer: Ok(auth_signer),
-    };
-
-    let aa_env = TempoBatchCallEnv {
-        signature: TempoSignature::Primitive(MockPrimitiveSignature { signature_type }),
-        key_authorization: Some(key_auth),
-        ..Default::default()
-    };
-
-    let (mut evm, handler) = prepare_evm_and_handler(
-        root_account,
-        fee_token,
-        fee_payer,
-        expected_chain_id,
-        nondet_balance(),
-        aa_env,
-    );
-    let _result = handler.validate_against_state_and_deduct_caller(&mut evm);
-    cvlr_satisfy!(true);
-}
-
-#[rule]
-pub fn sunbeam_key_auth_signature_recovery_fails() {
-    let root_account = nondet_address();
-    let fee_token = nondet_address();
-    let fee_payer = nondet_address();
-    let expected_chain_id: u64 = nondet();
-    let signature_type = nondet_signature_type();
-
-    let key_auth = SignedKeyAuthorization {
-        authorization: KeyAuthorization {
-            chain_id: expected_chain_id,
-            key_type: signature_type,
-            key_id: nondet_address(),
-            expiry: nondet_expiry(),
-            limits: nondet_limits(),
-        },
-        signature: MockPrimitiveSignature { signature_type },
-        recovered_signer: Err(()), // by construction, we make this Err
-    };
-
-    let aa_env = TempoBatchCallEnv {
-        signature: TempoSignature::Primitive(MockPrimitiveSignature { signature_type }),
-        key_authorization: Some(key_auth),
-        ..Default::default()
-    };
-
-    let (mut evm, handler) = prepare_evm_and_handler(
-        root_account,
-        fee_token,
-        fee_payer,
-        expected_chain_id,
-        nondet_balance(),
-        aa_env,
-    );
-    let result = handler.validate_against_state_and_deduct_caller(&mut evm);
-    cvlr_assert!(result.is_err());
-}
-
-#[rule]
-pub fn sunbeam_key_auth_signature_recovery_fails_sanity() {
-    let root_account = nondet_address();
-    let fee_token = nondet_address();
-    let fee_payer = nondet_address();
-    let expected_chain_id: u64 = nondet();
-    let signature_type = nondet_signature_type();
-
-    let key_auth = SignedKeyAuthorization {
-        authorization: KeyAuthorization {
-            chain_id: expected_chain_id,
-            key_type: signature_type,
-            key_id: nondet_address(),
-            expiry: nondet_expiry(),
-            limits: nondet_limits(),
-        },
-        signature: MockPrimitiveSignature { signature_type },
-        recovered_signer: Err(()),
+        recovered_signer,
     };
 
     let aa_env = TempoBatchCallEnv {
@@ -245,12 +173,9 @@ pub fn sunbeam_key_auth_chain_id_mismatch() {
     let fee_token = nondet_address();
     let fee_payer = nondet_address();
     let expected_chain_id: u64 = nondet();
+    let is_t1c: bool = nondet();
     let signature_type = nondet_signature_type();
     let wrong_chain_id: u64 = nondet();
-
-    // Pre-T1C, chain_id == 0 is a wildcard and should be handled by a separate rule.
-    cvlr_assume!(wrong_chain_id != 0);
-    cvlr_assume!(wrong_chain_id != expected_chain_id);
 
     let key_auth = SignedKeyAuthorization {
         authorization: KeyAuthorization {
@@ -278,8 +203,15 @@ pub fn sunbeam_key_auth_chain_id_mismatch() {
         nondet_balance(),
         aa_env,
     );
-    let result = handler.validate_against_state_and_deduct_caller(&mut evm);
-    cvlr_assert!(result.is_err());
+    evm.inner.ctx.cfg.spec = if is_t1c {
+        MockHardfork::T1C
+    } else {
+        MockHardfork::T1B
+    };
+    let _result = handler
+        .validate_against_state_and_deduct_caller(&mut evm)
+        .unwrap();
+    cvlr_assert!(wrong_chain_id == expected_chain_id || (!is_t1c && wrong_chain_id == 0));
 }
 
 #[rule]
@@ -288,12 +220,9 @@ pub fn sunbeam_key_auth_chain_id_mismatch_sanity() {
     let fee_token = nondet_address();
     let fee_payer = nondet_address();
     let expected_chain_id: u64 = nondet();
+    let is_t1c: bool = nondet();
     let signature_type = nondet_signature_type();
     let wrong_chain_id: u64 = nondet();
-
-    // Pre-T1C, chain_id == 0 is a wildcard and should be handled by a separate rule.
-    cvlr_assume!(wrong_chain_id != 0);
-    cvlr_assume!(wrong_chain_id != expected_chain_id);
 
     let key_auth = SignedKeyAuthorization {
         authorization: KeyAuthorization {
@@ -321,7 +250,14 @@ pub fn sunbeam_key_auth_chain_id_mismatch_sanity() {
         nondet_balance(),
         aa_env,
     );
-    let _result = handler.validate_against_state_and_deduct_caller(&mut evm);
+    evm.inner.ctx.cfg.spec = if is_t1c {
+        MockHardfork::T1C
+    } else {
+        MockHardfork::T1B
+    };
+    let _result = handler
+        .validate_against_state_and_deduct_caller(&mut evm)
+        .unwrap();
     cvlr_satisfy!(true);
 }
 
@@ -335,8 +271,6 @@ pub fn sunbeam_access_key_cannot_authorize_other_keys() {
     let access_key_addr = nondet_address();
     let authorized_key_id = nondet_address();
 
-    cvlr_assume!(access_key_addr != authorized_key_id);
-
     let key_auth = SignedKeyAuthorization {
         authorization: KeyAuthorization {
             chain_id: expected_chain_id,
@@ -367,8 +301,10 @@ pub fn sunbeam_access_key_cannot_authorize_other_keys() {
         nondet_balance(),
         aa_env,
     );
-    let result = handler.validate_against_state_and_deduct_caller(&mut evm);
-    cvlr_assert!(result.is_err());
+    let _result = handler
+        .validate_against_state_and_deduct_caller(&mut evm)
+        .unwrap();
+    cvlr_assert!(access_key_addr == authorized_key_id);
 }
 
 #[rule]
@@ -381,8 +317,6 @@ pub fn sunbeam_access_key_cannot_authorize_other_keys_sanity() {
     let access_key_addr = nondet_address();
     let authorized_key_id = nondet_address();
 
-    cvlr_assume!(access_key_addr != authorized_key_id);
-
     let key_auth = SignedKeyAuthorization {
         authorization: KeyAuthorization {
             chain_id: expected_chain_id,
@@ -413,7 +347,9 @@ pub fn sunbeam_access_key_cannot_authorize_other_keys_sanity() {
         nondet_balance(),
         aa_env,
     );
-    let _result = handler.validate_against_state_and_deduct_caller(&mut evm);
+    let _result = handler
+        .validate_against_state_and_deduct_caller(&mut evm)
+        .unwrap();
     cvlr_satisfy!(true);
 }
 
@@ -427,8 +363,6 @@ pub fn sunbeam_access_key_expiry_in_past() {
     let expiry: u64 = nondet();
     let current_timestamp: u64 = nondet();
 
-    cvlr_assume!(expiry <= current_timestamp);
-
     let key_auth = SignedKeyAuthorization {
         authorization: KeyAuthorization {
             chain_id: expected_chain_id,
@@ -456,8 +390,10 @@ pub fn sunbeam_access_key_expiry_in_past() {
         aa_env,
     );
     evm.inner.ctx.block.timestamp = U256::from(current_timestamp);
-    let result = handler.validate_against_state_and_deduct_caller(&mut evm);
-    cvlr_assert!(result.is_err());
+    let _ = handler
+        .validate_against_state_and_deduct_caller(&mut evm)
+        .unwrap();
+    cvlr_assert!(expiry > current_timestamp);
 }
 
 #[rule]
@@ -470,8 +406,6 @@ pub fn sunbeam_access_key_expiry_in_past_sanity() {
     let expiry: u64 = nondet();
     let current_timestamp: u64 = nondet();
 
-    cvlr_assume!(expiry <= current_timestamp);
-
     let key_auth = SignedKeyAuthorization {
         authorization: KeyAuthorization {
             chain_id: expected_chain_id,
@@ -499,7 +433,9 @@ pub fn sunbeam_access_key_expiry_in_past_sanity() {
         aa_env,
     );
     evm.inner.ctx.block.timestamp = U256::from(current_timestamp);
-    let _result = handler.validate_against_state_and_deduct_caller(&mut evm);
+    let _result = handler
+        .validate_against_state_and_deduct_caller(&mut evm)
+        .unwrap();
     cvlr_satisfy!(true);
 }
 
@@ -511,6 +447,8 @@ pub fn sunbeam_keychain_validation_fails() {
     let expected_chain_id: u64 = nondet();
     let signature_type = nondet_signature_type();
     let access_key_addr = nondet_address();
+    let authorized_user = nondet_address();
+    let authorized_key_id = nondet_address();
 
     let aa_env = TempoBatchCallEnv {
         signature: TempoSignature::Keychain(MockKeychainSignature {
@@ -533,12 +471,11 @@ pub fn sunbeam_keychain_validation_fails() {
     evm.inner
         .ctx
         .journaled_state
-        .set_keychain_validation_error(Some(TempoPrecompileError::Fatal(
-            "mock keychain validation failure",
-        )));
+        .set_authorized_key_pair(authorized_user, authorized_key_id);
 
     let result = handler.validate_against_state_and_deduct_caller(&mut evm);
-    cvlr_assert!(result.is_err());
+    // Validation succeeds only if the handler checked the right (user, key) pair.
+    cvlr_assert!(result.is_err() || (root_account == authorized_user && access_key_addr == authorized_key_id));
 }
 
 #[rule]
@@ -568,12 +505,11 @@ pub fn sunbeam_keychain_validation_fails_sanity() {
         nondet_balance(),
         aa_env,
     );
+    // Authorize the exact pair used so validation can succeed.
     evm.inner
         .ctx
         .journaled_state
-        .set_keychain_validation_error(Some(TempoPrecompileError::Fatal(
-            "mock keychain validation failure",
-        )));
+        .set_authorized_key_pair(root_account, access_key_addr);
 
     let _result = handler.validate_against_state_and_deduct_caller(&mut evm);
     cvlr_satisfy!(true);

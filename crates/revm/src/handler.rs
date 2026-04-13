@@ -499,6 +499,9 @@ impl<DB: Database, I> TempoEvmHandler<DB, I> {
                 };
 
                 // Only allow if authorizing the same key that's being used (same-tx auth+use)
+                // CERTORA BUG 1 for sunbeam_access_key_cannot_authorize_other_keys: compares access_key_addr to tx.caller instead of key_auth.key_id —
+                // allows any access key to authorize any other key as long as it equals the root account.
+                // `if access_key_addr != tx.caller {`
                 if access_key_addr != key_auth.key_id {
                     return Err(TempoInvalidTransaction::AccessKeyCannotAuthorizeOtherKeys.into());
                 }
@@ -512,6 +515,8 @@ impl<DB: Database, I> TempoEvmHandler<DB, I> {
                 .map_err(|_| TempoInvalidTransaction::KeyAuthorizationSignatureRecoveryFailed)?;
 
             // Verify the KeyAuthorization is signed by the root account
+            // CERTORA BUG 2 for sunbeam_key_auth_not_signed_by_root: condition is inverted — rejects valid signers, allows invalid ones.
+            // `if auth_signer == *root_account {`
             if auth_signer != *root_account {
                 return Err(TempoInvalidTransaction::KeyAuthorizationNotSignedByRoot {
                     expected: *root_account,
@@ -523,6 +528,10 @@ impl<DB: Database, I> TempoEvmHandler<DB, I> {
             // Validate KeyAuthorization chain_id.
             // T1C+: chain_id must exactly match (wildcard 0 is no longer allowed).
             // Pre-T1C: chain_id == 0 allows replay on any chain (wildcard).
+            // CERTORA BUG 3 for sunbeam_key_auth_chain_id_mismatch: passes key_auth.chain_id as expected_chain_id — always trivially succeeds.
+            // key_auth
+            //     .validate_chain_id(key_auth.chain_id, spec.is_t1c())
+            //     .map_err(TempoInvalidTransaction::from)?;
             key_auth
                 .validate_chain_id(cfg.chain_id(), spec.is_t1c())
                 .map_err(TempoInvalidTransaction::from)?;
@@ -587,6 +596,9 @@ impl<DB: Database, I> TempoEvmHandler<DB, I> {
 
                 // Validate expiry is not in the past
                 let current_timestamp = block.timestamp().saturating_to::<u64>();
+                // CERTORA BUG 4 for sunbeam_access_key_expiry_in_past: uses strict < instead of <= — lets through keys expiring exactly at
+                // the current timestamp.
+                // `if expiry < current_timestamp {`
                 if expiry <= current_timestamp {
                     return Err(TempoInvalidTransaction::AccessKeyExpiryInPast {
                         expiry,
@@ -729,6 +741,9 @@ impl<DB: Database, I> TempoEvmHandler<DB, I> {
                             })?;
 
                         #[cfg(feature = "certora")]
+                        // CERTORA BUG 5 for sunbeam_keychain_validation_fails: swaps user_address and access_key_addr — validates against
+                        // the wrong (key, user) pair instead of (user, key).
+                        // .validate_keychain_authorization(access_key_addr, *user_address, ...)
                         keychain
                             .validate_keychain_authorization(
                                 *user_address,

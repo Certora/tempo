@@ -249,6 +249,16 @@ impl From<SignatureType> for PrecompileSignatureType {
     }
 }
 
+impl From<SignatureType> for u8 {
+    fn from(value: SignatureType) -> Self {
+        match value {
+            SignatureType::Secp256k1 => 0,
+            SignatureType::P256 => 1,
+            SignatureType::WebAuthn => 2,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyAuthorizationTokenLimit {
     pub token: Address,
@@ -283,6 +293,24 @@ pub struct KeyAuthorization {
     pub limits: Option<Vec<KeyAuthorizationTokenLimit>>,
 }
 
+impl KeyAuthorization {
+    pub fn validate_chain_id(
+        &self,
+        expected_chain_id: u64,
+        is_t1c: bool,
+    ) -> Result<(), KeyAuthorizationChainIdError> {
+        if is_t1c {
+            if self.chain_id != expected_chain_id {
+                return Err(KeyAuthorizationChainIdError);
+            }
+        } else if self.chain_id != 0 && self.chain_id != expected_chain_id {
+            return Err(KeyAuthorizationChainIdError);
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignedKeyAuthorization {
     pub authorization: KeyAuthorization,
@@ -293,24 +321,6 @@ pub struct SignedKeyAuthorization {
 impl SignedKeyAuthorization {
     pub fn recover_signer(&self) -> Result<Address, ()> {
         self.recovered_signer
-    }
-
-    pub fn validate_chain_id(
-        &self,
-        expected_chain_id: u64,
-        strict: bool,
-    ) -> Result<(), KeyAuthorizationChainIdError> {
-        if strict {
-            if self.authorization.chain_id != expected_chain_id {
-                return Err(KeyAuthorizationChainIdError);
-            }
-        } else if self.authorization.chain_id != 0
-            && self.authorization.chain_id != expected_chain_id
-        {
-            return Err(KeyAuthorizationChainIdError);
-        }
-
-        Ok(())
     }
 }
 
@@ -508,35 +518,52 @@ impl GasParams {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct MockSpec {
-    pub t1: bool,
-    pub t1b: bool,
-    pub t1c: bool,
-    pub t2: bool,
+/// Ordered mock of the Tempo hardfork sequence.
+///
+/// Variants are ordered from oldest to newest; `PartialOrd`/`Ord` derive uses
+/// declaration order, so `T1B >= T1` holds exactly as in the real `TempoHardfork`.
+/// This means activation checks like `is_t1b()` correctly imply `is_t1()`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MockHardfork {
+    /// Pre-hardfork baseline (no Tempo features active).
+    Genesis,
+    /// T0 hardfork (default — matches `TempoHardfork` default).
+    #[default]
+    T0,
+    /// T1 hardfork — expiring nonce transactions.
+    T1,
+    /// T1.A hardfork — removes EIP-7825 per-transaction gas limit.
+    T1A,
+    /// T1.B hardfork.
+    T1B,
+    /// T1.C hardfork — chain-id wildcard removed from key authorizations.
+    T1C,
+    /// T2 hardfork — compound transfer policies.
+    T2,
 }
 
-impl MockSpec {
+impl MockHardfork {
     pub fn is_t1(self) -> bool {
-        self.t1
+        self >= Self::T1
     }
 
     pub fn is_t1b(self) -> bool {
-        self.t1b
+        self >= Self::T1B
     }
 
     pub fn is_t1c(self) -> bool {
-        self.t1c
+        self >= Self::T1C
     }
 
     pub fn is_t2(self) -> bool {
-        self.t2
+        self >= Self::T2
     }
 }
 
+
 #[derive(Debug, Clone)]
 pub struct CfgEnv {
-    pub spec: MockSpec,
+    pub spec: MockHardfork,
     pub disable_fee_charge: bool,
     pub chain_id: u64,
     pub gas_params: GasParams,
@@ -547,7 +574,7 @@ pub struct CfgEnv {
 impl Default for CfgEnv {
     fn default() -> Self {
         Self {
-            spec: MockSpec::default(),
+            spec: MockHardfork::default(),
             disable_fee_charge: false,
             chain_id: 1,
             gas_params: GasParams::default(),
@@ -558,7 +585,7 @@ impl Default for CfgEnv {
 }
 
 impl CfgEnv {
-    pub fn spec(&self) -> MockSpec {
+    pub fn spec(&self) -> MockHardfork {
         self.spec
     }
 
@@ -653,8 +680,10 @@ pub struct JournaledState<DB: Database> {
     pub mock_balance_owner: Address,
     /// Configurable mock balance entry used by `get_token_balance`.
     pub mock_token_balance: U256,
-    /// Configurable error returned by `validate_keychain_authorization`.
-    pub mock_keychain_validation_error: Option<TempoPrecompileError>,
+    /// Authorized (user, key_id) pair checked by `validate_keychain_authorization`.
+    /// Defaults to (ZERO, ZERO) — no key is authorized.
+    pub mock_authorized_user: Address,
+    pub mock_authorized_key_id: Address,
     _phantom: PhantomData<DB>,
 }
 
@@ -668,7 +697,8 @@ impl<DB: Database> Default for JournaledState<DB> {
             mock_balance_token: Address::ZERO,
             mock_balance_owner: Address::ZERO,
             mock_token_balance: U256::ZERO,
-            mock_keychain_validation_error: None,
+            mock_authorized_user: Address::ZERO,
+            mock_authorized_key_id: Address::ZERO,
             _phantom: PhantomData,
         }
     }
@@ -682,26 +712,27 @@ impl<DB: Database> JournaledState<DB> {
         self.mock_token_balance = balance;
     }
 
-    /// Sets the configured error used by `validate_keychain_authorization`.
-    pub fn set_keychain_validation_error(&mut self, error: Option<TempoPrecompileError>) {
-        self.mock_keychain_validation_error = error;
+    /// Sets the authorized (user, key_id) pair checked by `validate_keychain_authorization`.
+    pub fn set_authorized_key_pair(&mut self, user: Address, key_id: Address) {
+        self.mock_authorized_user = user;
+        self.mock_authorized_key_id = key_id;
     }
 
     pub fn get_fee_token(
         &mut self,
         tx: &TempoTxEnv,
         _fee_payer: Address,
-        _spec: MockSpec,
+        _spec: MockHardfork,
     ) -> Result<Address, TempoPrecompileError> {
         Ok(tx.fee_token.unwrap_or(Address::ZERO))
     }
 
     pub fn is_tip20_usd(
         &mut self,
-        _spec: MockSpec,
+        _spec: MockHardfork,
         _fee_token: Address,
     ) -> Result<bool, TempoPrecompileError> {
-        Ok(true)
+        Ok(cvlr::nondet())
     }
 
     pub fn load_account_with_code_mut(
@@ -912,7 +943,8 @@ impl StorageCtx {
         F: FnOnce(AccountKeychain) -> Result<R, EVMError<DB::Error, TempoInvalidTransaction>>,
     {
         f(AccountKeychain {
-            validation_error: journal.mock_keychain_validation_error.clone(),
+            authorized_user: journal.mock_authorized_user,
+            authorized_key_id: journal.mock_authorized_key_id,
         })
     }
 }
@@ -966,7 +998,8 @@ impl TempoPrecompileError {
 
 #[derive(Debug, Default, Clone)]
 pub struct AccountKeychain {
-    validation_error: Option<TempoPrecompileError>,
+    authorized_user: Address,
+    authorized_key_id: Address,
 }
 
 impl AccountKeychain {
@@ -987,15 +1020,16 @@ impl AccountKeychain {
     }
 
     pub fn validate_keychain_authorization(
-        &mut self,
-        _user_address: Address,
-        _access_key_addr: Address,
-        _timestamp: u64,
-        _sig_type: Option<PrecompileSignatureType>,
+        &self,
+        account: Address,
+        key_id: Address,
+        _current_timestamp: u64,
+        _expected_sig_type: Option<u8>,
     ) -> Result<(), TempoPrecompileError> {
-        match &self.validation_error {
-            Some(err) => Err(err.clone()),
-            None => Ok(()),
+        if account == self.authorized_user && key_id == self.authorized_key_id {
+            Ok(())
+        } else {
+            Err(TempoPrecompileError::Fatal("keychain: key not authorized"))
         }
     }
 
@@ -1086,7 +1120,7 @@ impl EvmPrecompileStorageProvider {
     pub fn new(
         _internals: EvmInternals,
         _gas_limit: u64,
-        _spec: MockSpec,
+        _spec: MockHardfork,
         _track_refunds: bool,
         _gas_params: GasParams,
     ) -> Self {
@@ -1132,6 +1166,6 @@ pub fn get_token_balance<DB: Database>(
     if token == journal.mock_balance_token && sender == journal.mock_balance_owner {
         Ok(journal.mock_token_balance)
     } else {
-        Ok(U256::ZERO)
+        Ok(U256::from(cvlr::nondet::<u64>()))
     }
 }

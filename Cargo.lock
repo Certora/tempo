@@ -12420,6 +12420,7 @@ dependencies = [
  "alloy-sol-types",
  "auto_impl",
  "base64 0.22.1",
+ "cvlr",
  "derive_more",
  "eyre",
  "p256",
