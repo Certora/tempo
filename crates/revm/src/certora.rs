@@ -543,8 +543,16 @@ pub enum MockHardfork {
 }
 
 impl MockHardfork {
+    pub fn is_t0(self) -> bool {
+        self >= Self::T0
+    }
+
     pub fn is_t1(self) -> bool {
         self >= Self::T1
+    }
+
+    pub fn is_t1a(self) -> bool {
+        self >= Self::T1A
     }
 
     pub fn is_t1b(self) -> bool {
@@ -559,7 +567,6 @@ impl MockHardfork {
         self >= Self::T2
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct CfgEnv {

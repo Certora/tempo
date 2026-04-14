@@ -528,10 +528,13 @@ impl<DB: Database, I> TempoEvmHandler<DB, I> {
             // Validate KeyAuthorization chain_id.
             // T1C+: chain_id must exactly match (wildcard 0 is no longer allowed).
             // Pre-T1C: chain_id == 0 allows replay on any chain (wildcard).
-            // CERTORA BUG 3 for sunbeam_key_auth_chain_id_mismatch: passes key_auth.chain_id as expected_chain_id — always trivially succeeds.
-            // key_auth
-            //     .validate_chain_id(key_auth.chain_id, spec.is_t1c())
-            //     .map_err(TempoInvalidTransaction::from)?;
+            // CERTORA BUG 3a for sunbeam_key_auth_chain_id_mismatch: passes key_auth.chain_id as
+            // expected_chain_id — always trivially succeeds.
+            // .validate_chain_id(key_auth.chain_id, spec.is_t1c())
+            //
+            // CERTORA BUG 3b for sunbeam_key_auth_chain_id_mismatch: uses is_t2() instead of
+            // is_t1c() — delays strict chain_id validation to T2, allowing wildcard 0 at T1C.
+            // .validate_chain_id(cfg.chain_id(), spec.is_t2())
             key_auth
                 .validate_chain_id(cfg.chain_id(), spec.is_t1c())
                 .map_err(TempoInvalidTransaction::from)?;
