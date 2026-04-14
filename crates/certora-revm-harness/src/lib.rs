@@ -360,7 +360,7 @@ pub fn sunbeam_access_key_expiry_in_past() {
     let fee_payer = nondet_address();
     let expected_chain_id: u64 = nondet();
     let signature_type = nondet_signature_type();
-    let expiry: u64 = nondet();
+    let expiry = nondet_expiry();
     let current_timestamp: u64 = nondet();
 
     let key_auth = SignedKeyAuthorization {
@@ -368,7 +368,7 @@ pub fn sunbeam_access_key_expiry_in_past() {
             chain_id: expected_chain_id,
             key_type: signature_type,
             key_id: nondet_address(),
-            expiry: Some(expiry),
+            expiry,
             limits: nondet_limits(),
         },
         signature: MockPrimitiveSignature { signature_type },
@@ -393,7 +393,7 @@ pub fn sunbeam_access_key_expiry_in_past() {
     let _ = handler
         .validate_against_state_and_deduct_caller(&mut evm)
         .unwrap();
-    cvlr_assert!(expiry > current_timestamp);
+    cvlr_assert!(expiry.is_none() || expiry.unwrap() > current_timestamp);
 }
 
 #[rule]
@@ -403,7 +403,7 @@ pub fn sunbeam_access_key_expiry_in_past_sanity() {
     let fee_payer = nondet_address();
     let expected_chain_id: u64 = nondet();
     let signature_type = nondet_signature_type();
-    let expiry: u64 = nondet();
+    let expiry = nondet_expiry();
     let current_timestamp: u64 = nondet();
 
     let key_auth = SignedKeyAuthorization {
@@ -411,7 +411,7 @@ pub fn sunbeam_access_key_expiry_in_past_sanity() {
             chain_id: expected_chain_id,
             key_type: signature_type,
             key_id: nondet_address(),
-            expiry: Some(expiry),
+            expiry,
             limits: nondet_limits(),
         },
         signature: MockPrimitiveSignature { signature_type },
