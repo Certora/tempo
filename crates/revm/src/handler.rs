@@ -704,6 +704,11 @@ impl<DB: Database, I> TempoEvmHandler<DB, I> {
 
             // Check if this transaction includes a KeyAuthorization for the same key
             // If so, skip keychain validation here - the key was just validated and authorized
+            //
+            // CERTORA BUG 5 for sunbeam_keychain_validation_fails: unwrap_or(true) instead of
+            // unwrap_or(false) — when key_authorization is None, keychain validation is silently
+            // skipped, allowing any unauthorized access key to execute transactions.
+            // .unwrap_or(true)
             let is_authorizing_this_key = tempo_tx_env
                 .key_authorization
                 .as_ref()
@@ -744,7 +749,7 @@ impl<DB: Database, I> TempoEvmHandler<DB, I> {
                             })?;
 
                         #[cfg(feature = "certora")]
-                        // CERTORA BUG 5 for sunbeam_keychain_validation_fails: swaps user_address and access_key_addr — validates against
+                        // CERTORA BUG 6 for sunbeam_keychain_validation_fails: swaps user_address and access_key_addr — validates against
                         // the wrong (key, user) pair instead of (user, key).
                         // .validate_keychain_authorization(access_key_addr, *user_address, ...)
                         keychain
